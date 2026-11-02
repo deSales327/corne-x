@@ -20,15 +20,29 @@ ROW_INDEX = {'r3': 0, 'r2': 1, 'r1': 2, 'r0': 3}
 
 def board_data():
     b = parse(open(os.path.join(HERE, 'corne-x.kicad_pcb'), encoding='utf8').read())
-    ring = []
+    # encadeia os segmentos do contorno (o KiCad pode guardá-los por outra ordem)
+    nxt = {}
     for g in find(b, 'gr_line'):
         if find(g, 'layer')[0][1] == '"Edge.Cuts"':
-            ring.append(tuple(map(float, find(g, 'start')[0][1:3])))
+            a, z = (tuple(round(float(v), 3) for v in find(g, k)[0][1:3]) for k in ('start', 'end'))
+            nxt.setdefault(a, []).append(z)
+            nxt.setdefault(z, []).append(a)
+    ring, prev = [next(iter(nxt))], None
+    while True:
+        cur = ring[-1]
+        step = next(p for p in nxt[cur] if p != prev)
+        if step == ring[0]:
+            break
+        prev = cur
+        ring.append(step)
     parts = {}
     for fp in find(b, 'footprint'):
         if find(fp, 'layer')[0][1] != '"F.Cu"':
             continue
-        ref = [c for c in find(fp, 'fp_text') if c[1] == 'reference'][0][2].strip('"')
+        # KiCad 6 usa fp_text reference; o KiCad 9 usa property "Reference"
+        ref = [c[2] for c in find(fp, 'fp_text') if c[1] == 'reference']
+        ref += [c[2] for c in find(fp, 'property') if c[1] == '"Reference"']
+        ref = ref[0].strip('"')
         at = find(fp, 'at')[0]
         parts[ref or 'BAT-'] = (float(at[1]), float(at[2]), float(at[3]) if len(at) > 3 else 0.0)
     return ring, parts
@@ -57,25 +71,21 @@ def xiao(x, y):
   {pads}
   <rect x="-4.5" y="-12.1" width="9" height="5.6" rx="1.3" fill="url(#steel)" stroke="#777" stroke-width=".15"/>
   <rect x="-3.4" y="-11.5" width="6.8" height="1.6" rx=".8" fill="#2a2a2a"/>
-  <rect x="-3.5" y="-2.5" width="7" height="7" rx=".4" fill="#2c2c2e" stroke="#4a4a4e" stroke-width=".15"/>
-  <circle cx="-2.6" cy="-1.6" r=".35" fill="#666"/>
-  <text x="0" y="1.6" font-size="1.1" fill="#9a9a9a" text-anchor="middle">RP2040</text>
-  <rect x="-3" y="5.6" width="4" height="2.8" rx=".3" fill="#2a2a2a"/>
-  <rect x="-6.6" y="-5.6" width="2" height="1.6" rx=".3" fill="#d9d9d9"/><circle cx="-5.6" cy="-4.8" r=".45" fill="#999"/>
-  <rect x="4.6" y="-5.6" width="2" height="1.6" rx=".3" fill="#d9d9d9"/><circle cx="5.6" cy="-4.8" r=".45" fill="#999"/>
-  <rect x="-1.5" y="-5.3" width="1" height=".7" fill="#7cfc9a"/><rect x=".5" y="-5.3" width="1" height=".7" fill="#ff6b6b"/>
+  <rect x="-6.3" y="-3.6" width="12.6" height="11.6" rx=".5" fill="url(#steel)" stroke="#8a8a8a" stroke-width=".15"/>
+  <rect x="-5.6" y="-2.9" width="11.2" height="10.2" rx=".3" fill="none" stroke="#ffffff88" stroke-width=".15"/>
+  <text x="0" y="2" font-size="1.25" fill="#555" text-anchor="middle" font-weight="600">nRF52840</text>
+  <text x="0" y="3.7" font-size=".9" fill="#666" text-anchor="middle">Seeed Studio</text>
+  <rect x="5" y="-6.2" width="1.8" height="1.4" rx=".3" fill="#d9d9d9"/><circle cx="5.9" cy="-5.5" r=".4" fill="#999"/>
+  <rect x="-1.5" y="-5.6" width="1" height=".7" fill="#7cfc9a"/><rect x=".5" y="-5.6" width="1" height=".7" fill="#ff6b6b"/>
+  <rect x="-7.2" y="-6.4" width="2.4" height="2" rx=".3" fill="#2a2a2a"/>
   <text x="0" y="9.6" font-size="1.4" fill="#cfcfcf" text-anchor="middle" font-weight="700">XIAO</text>
 </g>'''
 
 
-def trrs(x, y):
-    # PJ-320A deitado; a abertura para o cabo aponta para a borda de fora
-    return f'''<g transform="translate({x:.3f} {y:.3f})">
-  <rect x="-6" y="-3" width="12" height="6" rx=".6" fill="#000" opacity=".45" filter="url(#soft)" transform="translate(.4 .8)"/>
-  <rect x="-6" y="-3" width="11" height="6" rx=".6" fill="#202020" stroke="#444" stroke-width=".15"/>
-  <rect x="5" y="-2.5" width="2.2" height="5" rx=".5" fill="#2a2a2a"/>
-  <circle cx="6.6" cy="0" r="1.6" fill="url(#steel)"/><circle cx="6.6" cy="0" r=".9" fill="#111"/>
-</g>'''
+def hole(x, y):
+    # furo não metalizado de 3,2 mm: vê-se a mesa através dele
+    return (f'<circle cx="{x:.3f}" cy="{y:.3f}" r="1.6" fill="#a9a196" stroke="#2a1745" stroke-width=".35"/>'
+            f'<circle cx="{x + .25:.3f}" cy="{y + .3:.3f}" r="1.2" fill="#8f877c"/>')
 
 
 def slide_switch(x, y):
@@ -85,12 +95,15 @@ def slide_switch(x, y):
 </g>'''
 
 
-def jst(x, y):
-    return f'''<g transform="translate({x:.3f} {y:.3f})">
-  <rect x="-3" y="-2.6" width="6" height="4.2" rx=".4" fill="#f1ede2" stroke="#bbb" stroke-width=".15"/>
-  <rect x="-1.4" y="-1.8" width="2.8" height="2.2" fill="#d9d3c3"/>
-  <path d="M-.5 -2.6 C -.5 -6, -1 -9, 1 -12" stroke="#d33" stroke-width=".5" fill="none"/>
-  <path d="M .5 -2.6 C .5 -6, 0 -9, 2 -12" stroke="#222" stroke-width=".5" fill="none"/>
+def xh(x, y, hx, hy):
+    """JST-XH vertical com a ficha da bateria encaixada; (x, y) é o pino 1, (hx, hy) o furo dos fios."""
+    return f'''<g>
+  <rect x="{x - 2.45:.3f}" y="{y - 2.35:.3f}" width="7.4" height="5.75" rx=".4" fill="#000" opacity=".4" filter="url(#soft)" transform="translate(.4 .8)"/>
+  <rect x="{x - 2.45:.3f}" y="{y - 2.35:.3f}" width="7.4" height="5.75" rx=".4" fill="#f3efe4" stroke="#b9b2a2" stroke-width=".15"/>
+  <rect x="{x - 1.6:.3f}" y="{y - 1.5:.3f}" width="5.7" height="3.6" rx=".3" fill="#e4ddcc"/>
+  <path d="M{x:.3f} {y:.3f} C {x + 1:.3f} {y + 5:.3f}, {hx - 3:.3f} {hy + 3:.3f}, {hx - .4:.3f} {hy:.3f}" stroke="#c62828" stroke-width=".7" fill="none" stroke-linecap="round"/>
+  <path d="M{x + 2.5:.3f} {y:.3f} C {x + 3.5:.3f} {y + 4:.3f}, {hx - 2:.3f} {hy + 2:.3f}, {hx + .4:.3f} {hy:.3f}" stroke="#1b1b1b" stroke-width=".7" fill="none" stroke-linecap="round"/>
+  <circle cx="{x:.3f}" cy="{y:.3f}" r=".55" fill="url(#gold)"/><circle cx="{x + 2.5:.3f}" cy="{y:.3f}" r=".55" fill="url(#gold)"/>
 </g>'''
 
 
@@ -111,18 +124,17 @@ def half(side, ring, parts, keys, mirror_x):
                f'font-weight="700" letter-spacing=".4">corne-x</text>')
     out.append(xiao(X(xx), xy))
     jx, jy, _ = parts['J1']
-    out.append(trrs(X(jx), jy) if side == 'L'
-               else f'<g transform="translate({X(jx):.3f} 0) scale(-1 1)">{trrs(0, jy)}</g>')
-    bx, by, _ = parts['BT1']
-    out.append(jst(X(bx), by))
-    sx, sy, _ = parts['SW1']
+    hx, hy, _ = parts['H1']
+    out.append(hole(X(hx), hy))
+    out.append(xh(X(jx) - (2.5 if side == 'R' else 0), jy, X(hx), hy))
+    sx, sy, _ = parts['PWR1']
     out.append(slide_switch(X(sx), sy) if side == 'L'
                else f'<g transform="translate({X(sx):.3f} 0) scale(-1 1)">{slide_switch(0, sy)}</g>')
     for k in keys:
         label = LEGENDS[side][ROW_INDEX[k['row']]][k['col']]
         kind = 'thumb' if k['row'] == 'r0' else ('mod' if k['col'] == 0 else 'alpha')
         out.append(keycap(X(k['x']), k['y'], A(k['a']), label, kind))
-    return '\n'.join(out), X(jx)
+    return '\n'.join(out)
 
 
 def main():
@@ -133,24 +145,11 @@ def main():
     miny = min(y for _, y in ring)
     maxy = max(y for _, y in ring)
     mirror = 2 * maxx + GAP  # a metade direita é a mesma PCB virada ao contrário
-    left, jl = half('L', ring, parts, keys, mirror)
-    right, jr = half('R', ring, parts, keys, mirror)
-    jy = parts['J1'][1]
+    left = half('L', ring, parts, keys, mirror)
+    right = half('R', ring, parts, keys, mirror)
     w = (mirror - minx) - minx
     m = 14
     vx, vy, vw, vh = minx - m, miny - 22, w + 2 * m, (maxy - miny) + 22 + 20
-    usb_x, usb_top = parts['XIAO1'][0], parts['XIAO1'][1] - 12.1
-    cable = (f'<path d="M{jl + 7.2:.2f} {jy:.2f} C {jl + 22:.2f} {jy:.2f}, {jl + 14:.2f} {jy + 26:.2f}, '
-             f'{(jl + jr) / 2:.2f} {jy + 26:.2f} S {jr - 22:.2f} {jy:.2f}, {jr - 7.2:.2f} {jy:.2f}" '
-             f'stroke="#111" stroke-width="2.4" fill="none" stroke-linecap="round"/>'
-             f'<path d="M{jl + 7.2:.2f} {jy:.2f} C {jl + 22:.2f} {jy:.2f}, {jl + 14:.2f} {jy + 26:.2f}, '
-             f'{(jl + jr) / 2:.2f} {jy + 26:.2f} S {jr - 22:.2f} {jy:.2f}, {jr - 7.2:.2f} {jy:.2f}" '
-             f'stroke="#555" stroke-width=".6" fill="none" transform="translate(-.4 -.5)"/>'
-             f'<rect x="{jl + 7:.2f}" y="{jy - 1.6:.2f}" width="6" height="3.2" rx=".8" fill="#2b2b2b"/>'
-             f'<rect x="{jr - 13:.2f}" y="{jy - 1.6:.2f}" width="6" height="3.2" rx=".8" fill="#2b2b2b"/>'
-             f'<path d="M{usb_x:.2f} {usb_top - 4:.2f} C {usb_x:.2f} {usb_top - 16:.2f}, {usb_x + 40:.2f} '
-             f'{usb_top - 10:.2f}, {usb_x + 60:.2f} {vy:.2f}" stroke="#111" stroke-width="2.6" fill="none"/>'
-             f'<rect x="{usb_x - 3.5:.2f}" y="{usb_top - 6.5:.2f}" width="7" height="7" rx="1.2" fill="#2b2b2b"/>')
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx:.2f} {vy:.2f} {vw:.2f} {vh:.2f}"
      width="{vw * 6.2:.0f}" height="{vh * 6.2:.0f}" font-family="Segoe UI, Helvetica, Arial, sans-serif">
 <defs>
@@ -167,9 +166,8 @@ def main():
 <rect x="{vx:.2f}" y="{vy:.2f}" width="{vw:.2f}" height="{vh:.2f}" fill="url(#desk)"/>
 {left}
 {right}
-{cable}
 <text x="{vx + 8:.2f}" y="{vy + vh - 7:.2f}" font-size="4" fill="#3b3631" font-weight="700">corne-x</text>
-<text x="{vx + 31:.2f}" y="{vy + vh - 7:.2f}" font-size="2.6" fill="#5b554d">42 teclas · Kailh X (PG1425) · Seeed XIAO RP2040 · PCB reversível · mockup ilustrativo</text>
+<text x="{vx + 31:.2f}" y="{vy + vh - 7:.2f}" font-size="2.6" fill="#5b554d">42 teclas · Kailh X (PG1425) · Seeed XIAO nRF52840 (BLE, sem fios) · bateria LiPo por baixo · PCB reversível · mockup ilustrativo</text>
 </svg>'''
     with open(os.path.join(HERE, 'mockup.svg'), 'w', encoding='utf8') as f:
         f.write(svg)

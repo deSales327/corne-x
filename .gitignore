@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 *-backups/
 *.kicad_prl
+build/
+fp-info-cache
+

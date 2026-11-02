@@ -1,6 +1,7 @@
 """Gera uma PCB reversível no formato Corne (3x6 + 3 polegares) usando
-os footprints da PCB do dust (Kailh X / PG1425, XIAO reversível, TRRS,
-bateria). Uso:
+os footprints da PCB do dust (Kailh X / PG1425, XIAO reversível, interruptor
+de energia). Versão sem fios (XIAO BLE): o conector JST-XH da bateria e o furo
+para os fios são acrescentados depois por finalizar_pcb.py. Uso:
 
     python gerar_pcb.py <caminho/para/dust.kicad_pcb>
 
@@ -123,9 +124,8 @@ def templates(dust):
     return dict(
         switch=by_ref[('S1', '"F.Cu"')],
         diode=by_ref[('D1', '"F.Cu"')],
-        # bloco de eletrónica (XIAO, TRRS, JST, interruptor, pad da bateria), frente e verso
-        cluster=[f for f in fps if ref(f) in ('XIAO1', 'REF**', 'BT2', 'T1', '')
-                 and not f[1].startswith('"kibuzzard')],
+        # bloco de eletrónica (XIAO e interruptor de energia), frente e verso
+        cluster=[f for f in fps if ref(f) in ('XIAO1', 'T1')],
     )
 
 
@@ -173,13 +173,17 @@ def main(dust_path):
     # Bloco de eletrónica: mesma posição relativa à coluna interna que no dust
     inner_top = next(k for k in keys if k['col'] == 5 and k['row'] == 'r3')
     ox, oy = inner_top['x'] - 237.83833, inner_top['y'] - 98.948154
-    refs = {'REF**': 'J1', 'BT2': 'BT1', 'T1': 'SW1'}
+    refs = {'T1': 'PWR1'}
     for f in tpl['cluster']:
         at = find(f, 'at')[0]
         r = [c for c in find(f, 'fp_text') if c[1] == 'reference']
         old = r[0][2].strip('"') if r else ''
         board.place(f, float(at[1]) + ox, float(at[2]) + oy, None, refs.get(old),
                     lambda pad, net: XIAO_NETS.get(net, net) if old == 'XIAO1' else net)
+        if old == 'T1' and find(f, 'layer')[0][1] == '"B.Cu"':
+            # as duas cópias do interruptor (frente/verso) partilham os furos: só a da frente os leva
+            fp = board.footprints[-1]
+            fp[:] = [c for c in fp if not (isinstance(c, list) and c[0] == 'pad' and c[2] == 'np_thru_hole')]
     cluster_area = box(inner_top['x'] + SX / 2, inner_top['y'] - 2.25,
                        inner_top['x'] + 32.0, inner_top['y'] + 40.2)
 
